@@ -2,11 +2,12 @@
 // app.js — screens, rendering and the host/client wiring.
 // ============================================================
 
-import { $, $$, el, toast, buzz, lsGet, lsSet, lsDel, keepAwake, isRoomCode, CODE_LEN } from './util.js?v=202609190337';
-import { PRESETS, presetRoles, makeRole, validateRoles } from './roles.js?v=202609190337';
-import { Game } from './game.js?v=202609190337';
-import { HostNet, ClientNet } from './net.js?v=202609190337';
-import { ShakeDetector, motionSupported, needsMotionPermission, requestMotionPermission } from './shake.js?v=202609190337';
+import { $, $$, el, toast, buzz, lsGet, lsSet, lsDel, keepAwake, isRoomCode, CODE_LEN } from './util.js?v=202609190342';
+import { PRESETS, presetRoles, makeRole, validateRoles } from './roles.js?v=202609190342';
+import { Game } from './game.js?v=202609190342';
+import { HostNet, ClientNet } from './net.js?v=202609190342';
+import { ShakeDetector, motionSupported, needsMotionPermission, requestMotionPermission } from './shake.js?v=202609190342';
+import { sfx, setMuted, isMuted, primeAudio } from './sfx.js?v=202609190342';
 
 const RESUME_TTL = 8 * 60 * 60 * 1000;   // 8h — long enough for a night of games
 
@@ -380,13 +381,14 @@ function bindCover(node, what) {
       void node.offsetWidth;
       node.classList.add('denied');
       buzz([25, 40, 25]);
+      sfx('deny');
       toast('角色牌鎖咗，要自己解鎖');
       return;
     }
     if (open === v) return;
     open = v;
     node.classList.toggle('open', v);
-    if (v) { buzz(12); sendSeen(what); }
+    if (v) { buzz(12); sfx(what === 'dice' ? 'lift' : 'flip'); sendSeen(what); }
   };
 
   node.addEventListener('pointerdown', (e) => {
@@ -433,11 +435,14 @@ window.addEventListener('pagehide', closeAllCovers);
 // ------------------------------------------------------------
 let diceCoverApi = null;
 let lastLockNudge = 0;
+let lastLocalRoll = 0;   // so a roll is not announced twice on this phone
 
 function doRoll() {
   if (S.lock.dice) return nudgeLocked();
+  lastLocalRoll = Date.now();
   diceCoverApi?.shake();
   buzz([12, 40, 12]);
+  sfx('roll');
   if (S.mode === 'host') S.game.rollOne(S.myId);
   else S.net?.send({ t: 'roll' });
 }
@@ -448,6 +453,7 @@ function nudgeLocked() {
   if (now - lastLockNudge < 2500) return;
   lastLockNudge = now;
   buzz([20, 50, 20]);
+  sfx('deny');
   toast('點數鎖咗，搖極都唔會變');
   const cup = $('#dice-cover');
   cup.classList.remove('denied');
@@ -558,6 +564,7 @@ function requestLock(what, on) {
   if (S.mode === 'host') S.game.setLock(S.myId, what, on);
   else S.net?.send({ t: 'lock', what, on });
   buzz(on ? [14, 30, 14] : 14);
+  sfx(on ? 'lock' : 'unlock');
   if (on && LOCK_BLOCKS_PEEK[what]) closeAllCovers();
   render();
 }
@@ -585,6 +592,44 @@ function syncLocks(st) {
 
   if (S.mode === 'client' && S.lock.role && !me.roleLocked) S.net?.send({ t: 'lock', what: 'role', on: true });
   else S.lock.role = me.roleLocked;
+}
+
+// ------------------------------------------------------------
+// sound cues driven by room state, not by who pressed what
+// ------------------------------------------------------------
+let heard = { primed: false, round: 0, reveal: false, players: 0, phase: null };
+
+function chimeForState(st) {
+  if (!st) return;
+  const snap = { primed: true, round: st.round, reveal: st.revealRoles, players: st.players.length, phase: st.phase };
+  // The first state a phone receives is history, not news — stay quiet.
+  if (!heard.primed) { heard = snap; return; }
+
+  if (st.phase === 'playing' && heard.phase === 'lobby') sfx('start');
+  else if (st.round !== heard.round) sfx('deal');
+  if (st.revealRoles && !heard.reveal) sfx('reveal');
+  if (st.phase === 'lobby' && heard.phase === 'lobby' && st.players.length > heard.players) sfx('join');
+
+  heard = snap;
+}
+
+let heardDiceSeq = null;
+
+/**
+ * Dice that arrived because somebody else rolled for us.
+ *
+ * Keyed on the host's roll counter, not the values: a deal pushes the same
+ * dice again (and would otherwise rattle the cup for no reason), while a
+ * re-roll landing on the same number is still a real roll.
+ */
+function chimeForSecret(secret) {
+  const seq = secret?.diceSeq ?? 0;
+  const prev = heardDiceSeq;
+  heardDiceSeq = seq;
+  if (prev === null || seq === prev || !secret?.dice?.length) return;
+  if (Date.now() - lastLocalRoll < 1200) return;   // this phone already played it
+  diceCoverApi?.shake();
+  sfx('roll');
 }
 
 // ------------------------------------------------------------
@@ -619,6 +664,7 @@ function pushState() {
     if (!S.game) return;
     S.state = S.game.publicState();
     S.net?.broadcast({ t: 'state', state: S.state });
+    chimeForState(S.state);
     syncLocks(S.state);
     saveHostSnapshot();
     render();
@@ -631,7 +677,7 @@ function pushSecret(pid) {
   const p = g.players.get(pid);
   if (!p) return;
   const payload = g.secretFor(pid);
-  if (pid === g.hostId) { S.secret = payload; closeAllCovers(); render(); }
+  if (pid === g.hostId) { S.secret = payload; closeAllCovers(); chimeForSecret(payload); render(); }
   else if (p.peerId) S.net.sendTo(p.peerId, { t: 'secret', secret: payload });
 }
 
@@ -714,6 +760,7 @@ function onClientMessage(msg) {
       S.secret = msg.secret;
       S.lastRound = msg.state.round;
       S.seenUnlockSeq = msg.state.diceUnlockSeq ?? 0;
+      chimeForState(msg.state);
       syncLocks(msg.state);
       goto(msg.state.phase === 'lobby' ? 'lobby' : 'game');
       render();
@@ -723,6 +770,7 @@ function onClientMessage(msg) {
       const prev = S.lastRound;
       S.state = msg.state;
       if (msg.state.round !== prev) { S.lastRound = msg.state.round; closeAllCovers(); }
+      chimeForState(msg.state);
       syncLocks(msg.state);
       if (msg.state.phase === 'playing' && S.screen === 'lobby') goto('game');
       if (msg.state.phase === 'lobby' && S.screen === 'game') goto('lobby');
@@ -731,6 +779,7 @@ function onClientMessage(msg) {
     }
 
     case 'secret':
+      chimeForSecret(msg.secret);
       S.secret = msg.secret;
       // A fresh card or a fresh roll is a new object to hide, so the old
       // latch does not carry over — the host cleared its copy too.
@@ -849,6 +898,8 @@ function leaveRoom() {
   });
   keepAwake(false);
   shaker.stop();
+  heard = { primed: false, round: 0, reveal: false, players: 0, phase: null };
+  heardDiceSeq = null;
   setHostBody(false);
   netbar(null);
   closeAllCovers();
@@ -996,6 +1047,25 @@ function boot() {
       box.append(el('div', { class: 'qr-fail', text: '載入唔到 QR — 用「複製連結」啦' }));
     }
   };
+
+  // ---- sound ----
+  setMuted(lsGet('ct:muted', false));
+  const syncSound = () => {
+    for (const b of $$('.sound-btn')) {
+      b.textContent = isMuted() ? '🔇' : '🔊';
+      b.classList.toggle('off', isMuted());
+    }
+  };
+  for (const b of $$('.sound-btn')) {
+    b.onclick = () => {
+      const next = !isMuted();
+      setMuted(next);
+      lsSet('ct:muted', next);
+      syncSound();
+      if (!next) { primeAudio(); sfx('tap'); }   // the tap itself unlocks iOS audio
+    };
+  }
+  syncSound();
 
   // ---- game ----
   bindCover($('#role-cover'), 'role');

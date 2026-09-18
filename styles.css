@@ -97,6 +97,8 @@ body {
   display: grid; place-items: center; font-family: inherit;
 }
 .icon-btn:active { background: var(--surface-2); }
+.sound-btn { font-size: 1.125rem; }
+.sound-btn.off { opacity: .45; }
 
 /* ---------- card ---------- */
 .card {
