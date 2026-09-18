@@ -2,10 +2,11 @@
 // app.js — screens, rendering and the host/client wiring.
 // ============================================================
 
-import { $, $$, el, toast, buzz, lsGet, lsSet, lsDel, keepAwake, isRoomCode, CODE_LEN } from './util.js?v=202609190252';
-import { PRESETS, presetRoles, makeRole, validateRoles } from './roles.js?v=202609190252';
-import { Game } from './game.js?v=202609190252';
-import { HostNet, ClientNet } from './net.js?v=202609190252';
+import { $, $$, el, toast, buzz, lsGet, lsSet, lsDel, keepAwake, isRoomCode, CODE_LEN } from './util.js?v=202609190337';
+import { PRESETS, presetRoles, makeRole, validateRoles } from './roles.js?v=202609190337';
+import { Game } from './game.js?v=202609190337';
+import { HostNet, ClientNet } from './net.js?v=202609190337';
+import { ShakeDetector, motionSupported, needsMotionPermission, requestMotionPermission } from './shake.js?v=202609190337';
 
 const RESUME_TTL = 8 * 60 * 60 * 1000;   // 8h — long enough for a night of games
 
@@ -22,6 +23,9 @@ const S = {
   joinCode: [],        // digits tapped on the dice keypad
   lock: { role: false, dice: false },
   seenUnlockSeq: 0,
+  shakeOn: lsGet('ct:shake', true),
+  motionPerm: lsGet('ct:motionPerm', 'unknown'),   // iOS 13+ only; elsewhere the sensor is just there
+  motionStalled: false,        // armed, but no readings are coming through
   create: {
     count: 5,
     hostPlays: true,
@@ -336,6 +340,8 @@ function renderGame() {
     ));
   }
 
+  syncShake();
+
   // --- host controls ---
   if (S.mode === 'host') {
     $('#btn-unlock-dice').disabled = !st.players.some(p => p.diceLocked);
@@ -421,6 +427,128 @@ function closeAllCovers() { covers.forEach(c => c.close()); }
 document.addEventListener('visibilitychange', () => { if (document.hidden) closeAllCovers(); });
 window.addEventListener('blur', closeAllCovers);
 window.addEventListener('pagehide', closeAllCovers);
+
+// ------------------------------------------------------------
+// rolling — one path for the button, the shake and nothing else
+// ------------------------------------------------------------
+let diceCoverApi = null;
+let lastLockNudge = 0;
+
+function doRoll() {
+  if (S.lock.dice) return nudgeLocked();
+  diceCoverApi?.shake();
+  buzz([12, 40, 12]);
+  if (S.mode === 'host') S.game.rollOne(S.myId);
+  else S.net?.send({ t: 'roll' });
+}
+
+/** Shaking a locked cup should say so, but not once per jolt. */
+function nudgeLocked() {
+  const now = Date.now();
+  if (now - lastLockNudge < 2500) return;
+  lastLockNudge = now;
+  buzz([20, 50, 20]);
+  toast('點數鎖咗，搖極都唔會變');
+  const cup = $('#dice-cover');
+  cup.classList.remove('denied');
+  void cup.offsetWidth;
+  cup.classList.add('denied');
+}
+
+// ------------------------------------------------------------
+// shake to roll
+// ------------------------------------------------------------
+const shaker = new ShakeDetector({
+  onShake: () => {
+    if (S.screen !== 'game') return;
+    const me = S.state?.players.find(p => p.id === S.myId);
+    if (!me?.isPlayer) return;
+    if (!(S.state.settings.dice.self || S.mode === 'host')) return;
+    doRoll();
+  },
+  onSensorOk: () => {
+    if (!S.motionStalled) return;
+    S.motionStalled = false;
+    syncShake();
+  },
+  onNoSensor: () => {
+    // Armed but nothing arriving. On iOS that means a remembered grant has
+    // lapsed, not that the hardware is missing — so send them back to the
+    // button rather than telling them their phone has no accelerometer.
+    S.motionStalled = true;
+    if (needsMotionPermission()) { S.motionPerm = 'unknown'; lsSet('ct:motionPerm', 'unknown'); }
+    syncShake();
+  },
+  // Tuned by feel: a phone set down hard is one jolt, a shake is many.
+  // Too sensitive / not sensitive enough? change `threshold` in shake.js.
+  threshold: 10,
+  hits: 3,
+});
+
+function syncShake() {
+  const btn = $('#btn-shake');
+  const note = $('#shake-note');
+
+  if (!motionSupported()) { btn.classList.add('hidden'); note.textContent = ''; shaker.stop(); return; }
+  btn.classList.remove('hidden');
+  note.classList.remove('warn-text');
+
+  if (S.motionPerm === 'denied') {
+    shaker.stop();
+    btn.textContent = '📳 iPhone 拒絕咗動作權限';
+    btn.disabled = true;
+    btn.classList.remove('btn-locked');
+    note.textContent = 'Safari 記住咗個「唔准」。喺網址列㩒「ㄅA」→ 網站設定 開返「動作與方向」，或者清除本站資料再 refresh。';
+    note.classList.add('warn-text');
+    return;
+  }
+
+  btn.disabled = false;
+  const armed = S.shakeOn && (S.motionPerm === 'granted' || !needsMotionPermission());
+
+  if (armed && S.screen === 'game') {
+    shaker.start();
+    btn.textContent = '📳 搖骰已開 — 㩒一下熄';
+    btn.classList.add('btn-locked');
+    if (S.motionStalled) {
+      note.textContent = '收唔到動作數據 — 部機可能冇感應器，用上面粒掣搖啦。';
+      note.classList.add('warn-text');
+    } else {
+      note.textContent = S.lock.dice ? '點數鎖咗，搖極都唔會變' : '搖下部手機就當搖骰';
+    }
+  } else {
+    shaker.stop();
+    btn.textContent = '📳 開啟搖骰';
+    btn.classList.remove('btn-locked');
+    if (S.motionStalled) {
+      note.textContent = needsMotionPermission()
+        ? 'iPhone 未送緊動作數據 — 㩒一下重新批准。'
+        : '部機好似冇動作感應器 — 用上面粒掣搖啦。';
+      note.classList.add('warn-text');
+    } else {
+      note.textContent = needsMotionPermission() && S.motionPerm !== 'granted'
+        ? '㩒一下，iPhone 會問你畀唔畀動作權限'
+        : '搖部機擲骰（而家熄咗）';
+    }
+  }
+}
+
+async function onShakeButton() {
+  S.motionStalled = false;   // they are retrying; give it a clean shot
+  // iOS only grants this from inside the tap itself, so the request must be
+  // the very first await in this handler — do not put anything before it.
+  if (needsMotionPermission() && S.motionPerm !== 'granted') {
+    const res = await requestMotionPermission();
+    S.motionPerm = res;
+    lsSet('ct:motionPerm', res);
+    if (res !== 'granted') { S.shakeOn = false; lsSet('ct:shake', false); syncShake(); return; }
+    S.shakeOn = true;
+  } else {
+    S.shakeOn = !S.shakeOn;
+  }
+  lsSet('ct:shake', S.shakeOn);
+  syncShake();
+}
 
 // ------------------------------------------------------------
 // locks
@@ -720,6 +848,7 @@ function leaveRoom() {
     lock: { role: false, dice: false },
   });
   keepAwake(false);
+  shaker.stop();
   setHostBody(false);
   netbar(null);
   closeAllCovers();
@@ -871,14 +1000,10 @@ function boot() {
   // ---- game ----
   bindCover($('#role-cover'), 'role');
   const diceCover = bindCover($('#dice-cover'), 'dice');
+  diceCoverApi = diceCover;
 
-  $('#btn-roll').onclick = () => {
-    if (S.lock.dice) { toast('點數鎖咗，要主持解鎖先搖得'); return; }
-    diceCover.shake();
-    buzz([12, 40, 12]);
-    if (S.mode === 'host') S.game.rollOne(S.myId);
-    else S.net?.send({ t: 'roll' });
-  };
+  $('#btn-roll').onclick = doRoll;
+  $('#btn-shake').onclick = onShakeButton;
   $('#btn-lock-role').onclick = () => requestLock('role', !S.lock.role);
   $('#btn-lock-dice').onclick = () => requestLock('dice', true);
 
