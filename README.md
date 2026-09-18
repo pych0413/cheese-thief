@@ -83,6 +83,16 @@ cd cheese-thief
 
 幾分鐘後就開到 `https://<你>.github.io/cheese-thief/`。
 
+**改完 `styles.css` 或者 `js/` 記住行呢句先 push：**
+
+```bash
+./tools/bump-version.sh
+```
+
+GitHub Pages 硬性 `Cache-Control: max-age=600` 而且改唔到。冇版本號嘅話，10 分鐘內開過個網嘅人
+會攞到**新嘅 index.html 配舊嘅 css/js** — 畫面會半爛。個 script 會喺所有 asset URL 同
+module import 補返個 `?v=`，等成個 module graph 一齊換版本。
+
 ### 本地跑
 
 ES modules 開唔到 `file://`，要行個 static server：
@@ -109,6 +119,7 @@ python -m http.server 5178
 
 ```
 index.html          全部 screen（home / join / create / lobby / game）
+tools/bump-version.sh  撞穿 GitHub Pages 10 分鐘快取用
 styles.css          mobile-first 深色主題
 js/util.js          crypto 隨機、DOM helper、wake lock、safe localStorage
 js/roles.js         角色範本 + 牌堆生成

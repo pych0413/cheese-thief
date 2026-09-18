@@ -2,10 +2,10 @@
 // app.js — screens, rendering and the host/client wiring.
 // ============================================================
 
-import { $, $$, el, toast, buzz, lsGet, lsSet, lsDel, keepAwake, isRoomCode, CODE_LEN } from './util.js';
-import { PRESETS, presetRoles, makeRole, validateRoles } from './roles.js';
-import { Game } from './game.js';
-import { HostNet, ClientNet } from './net.js';
+import { $, $$, el, toast, buzz, lsGet, lsSet, lsDel, keepAwake, isRoomCode, CODE_LEN } from './util.js?v=202609190252';
+import { PRESETS, presetRoles, makeRole, validateRoles } from './roles.js?v=202609190252';
+import { Game } from './game.js?v=202609190252';
+import { HostNet, ClientNet } from './net.js?v=202609190252';
 
 const RESUME_TTL = 8 * 60 * 60 * 1000;   // 8h — long enough for a night of games
 
