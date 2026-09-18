@@ -2,7 +2,7 @@
 // app.js — screens, rendering and the host/client wiring.
 // ============================================================
 
-import { $, $$, el, toast, buzz, lsGet, lsSet, lsDel, keepAwake } from './util.js';
+import { $, $$, el, toast, buzz, lsGet, lsSet, lsDel, keepAwake, isRoomCode, CODE_LEN } from './util.js';
 import { PRESETS, presetRoles, makeRole, validateRoles } from './roles.js';
 import { Game } from './game.js';
 import { HostNet, ClientNet } from './net.js';
@@ -19,7 +19,9 @@ const S = {
   state: null,         // public state (both modes)
   secret: null,        // my private payload
   lastRound: -1,
-  holdMode: lsGet('ct:holdMode', 'hold'),
+  joinCode: [],        // digits tapped on the dice keypad
+  lock: { role: false, dice: false },
+  seenUnlockSeq: 0,
   create: {
     count: 5,
     hostPlays: true,
@@ -46,6 +48,35 @@ function netbar(kind, text) {
   b.classList.remove('hidden');
   b.classList.toggle('warn', kind === 'warn');
   b.textContent = text;
+}
+
+// ------------------------------------------------------------
+// dice rendering — shared by the keypad, the room code and the cup
+// ------------------------------------------------------------
+const PIPS = {
+  1: ['c'], 2: ['tl', 'br'], 3: ['tl', 'c', 'br'],
+  4: ['tl', 'tr', 'bl', 'br'], 5: ['tl', 'tr', 'c', 'bl', 'br'],
+  6: ['tl', 'tr', 'ml', 'mr', 'bl', 'br'],
+};
+const PIP_POS = { tl: [1, 1], tr: [1, 3], ml: [2, 1], c: [2, 2], mr: [2, 3], bl: [3, 1], br: [3, 3] };
+
+function addPips(node, value) {
+  for (const k of PIPS[value]) {
+    const [r, c] = PIP_POS[k];
+    const pip = el('span', { class: 'pip' });
+    pip.style.gridRow = r;
+    pip.style.gridColumn = c;
+    node.append(pip);
+  }
+}
+
+function dieEl(value, sides = 6) {
+  if (sides === 6 && PIPS[value]) {
+    const d = el('div', { class: 'die pips' });
+    addPips(d, value);
+    return d;
+  }
+  return el('div', { class: 'die', text: String(value) });
 }
 
 // ------------------------------------------------------------
@@ -126,12 +157,61 @@ function refreshCreate() {
 }
 
 // ------------------------------------------------------------
+// join screen — the room code is four dice, so the keypad is too
+// ------------------------------------------------------------
+function renderDicePad() {
+  const pad = $('#dice-pad');
+  pad.innerHTML = '';
+  for (let v = 1; v <= 6; v++) {
+    const b = el('button', {
+      class: 'pad-die', type: 'button', 'aria-label': '輸入 ' + v,
+      onclick: () => pushDigit(v),
+    });
+    addPips(b, v);
+    pad.append(b);
+  }
+}
+
+function renderCodeSlots() {
+  const wrap = $('#code-slots');
+  wrap.innerHTML = '';
+  for (let i = 0; i < CODE_LEN; i++) {
+    const v = S.joinCode[i];
+    const slot = el('div', { class: 'code-slot' + (v ? ' filled' : '') });
+    if (v) slot.append(dieEl(v));
+    wrap.append(slot);
+  }
+  const full = S.joinCode.length === CODE_LEN;
+  $('#btn-join').disabled = !full;
+  $('#btn-code-back').disabled = S.joinCode.length === 0;
+  $('#btn-code-clear').disabled = S.joinCode.length === 0;
+}
+
+function pushDigit(v) {
+  if (S.joinCode.length >= CODE_LEN) return;
+  S.joinCode.push(v);
+  buzz(10);
+  renderCodeSlots();
+  if (S.joinCode.length === CODE_LEN) $('#join-name').focus({ preventScroll: true });
+}
+
+function setJoinCode(code) {
+  S.joinCode = String(code ?? '').split('').map(Number).filter(n => n >= 1 && n <= 6).slice(0, CODE_LEN);
+  renderCodeSlots();
+}
+
+const joinCodeString = () => S.joinCode.join('');
+
+// ------------------------------------------------------------
 // lobby
 // ------------------------------------------------------------
 function renderLobby() {
   const st = S.state;
   if (!st) return;
-  $('#lobby-code').textContent = st.code;
+
+  const codeBox = $('#lobby-code');
+  codeBox.innerHTML = '';
+  for (const ch of String(st.code)) codeBox.append(dieEl(Number(ch)));
 
   const seated = st.players.filter(p => p.isPlayer);
   $('#lobby-count').textContent = `${seated.length} / ${st.settings.maxPlayers}`;
@@ -180,27 +260,6 @@ function renderLobby() {
 // ------------------------------------------------------------
 // game
 // ------------------------------------------------------------
-const PIPS = {
-  1: ['c'], 2: ['tl', 'br'], 3: ['tl', 'c', 'br'],
-  4: ['tl', 'tr', 'bl', 'br'], 5: ['tl', 'tr', 'c', 'bl', 'br'],
-  6: ['tl', 'tr', 'ml', 'mr', 'bl', 'br'],
-};
-const PIP_POS = { tl: [1, 1], tr: [1, 3], ml: [2, 1], c: [2, 2], mr: [2, 3], bl: [3, 1], br: [3, 3] };
-
-function dieEl(value, sides) {
-  if (sides === 6 && PIPS[value]) {
-    const d = el('div', { class: 'die pips' });
-    for (const k of PIPS[value]) {
-      const [r, c] = PIP_POS[k];
-      const pip = el('span', { class: 'pip' });
-      pip.style.gridRow = r; pip.style.gridColumn = c;
-      d.append(pip);
-    }
-    return d;
-  }
-  return el('div', { class: 'die', text: String(value) });
-}
-
 function roleById(id) { return S.state?.settings.roles.find(r => r.id === id) ?? null; }
 
 function renderGame() {
@@ -209,15 +268,8 @@ function renderGame() {
   $('#game-round').textContent = st.round;
   $('#game-code').textContent = st.code;
 
-  // --- my role ---
   const me = st.players.find(p => p.id === S.myId);
   const amPlayer = me?.isPlayer ?? false;
-  $('#my-role-card').classList.toggle('hidden', !amPlayer);
-
-  const role = roleById(S.secret?.roleId);
-  $('#role-emoji').textContent = role?.emoji ?? '❔';
-  $('#role-name').textContent  = role?.name ?? '未派牌';
-  $('#role-desc').textContent  = role?.desc ?? '';
 
   // --- my dice ---
   const d = st.settings.dice;
@@ -231,9 +283,30 @@ function renderGame() {
     row.append(el('div', { class: 'die', text: '–' }));
     $('#dice-sum').textContent = '未搖過';
   }
-  const canSelfRoll = amPlayer && (d.self || S.mode === 'host');
-  $('#btn-roll').classList.toggle('hidden', !canSelfRoll);
   $('#dice-card').classList.toggle('hidden', !amPlayer);
+  $('#btn-roll').classList.toggle('hidden', !(d.self || S.mode === 'host'));
+  $('#btn-roll').disabled = S.lock.dice;
+
+  const lockDiceBtn = $('#btn-lock-dice');
+  lockDiceBtn.textContent = S.lock.dice ? '🔒 已鎖 — 要主持解鎖' : '🔓 鎖定骰盅';
+  lockDiceBtn.classList.toggle('btn-locked', S.lock.dice);
+  lockDiceBtn.disabled = S.lock.dice || !mine?.length;
+  $('#dice-cover').classList.toggle('locked', S.lock.dice);
+  $('#dice-hint').textContent = S.lock.dice ? '已鎖定' : '㩒住掀起個盅';
+
+  // --- my role ---
+  $('#my-role-card').classList.toggle('hidden', !amPlayer);
+  const role = roleById(S.secret?.roleId);
+  $('#role-emoji').textContent = role?.emoji ?? '❔';
+  $('#role-name').textContent  = role?.name ?? '未派牌';
+  $('#role-desc').textContent  = role?.desc ?? '';
+
+  const lockRoleBtn = $('#btn-lock-role');
+  lockRoleBtn.textContent = S.lock.role ? '🔒 已鎖 — 㩒一下解鎖' : '🔓 鎖定角色牌';
+  lockRoleBtn.classList.toggle('btn-locked', S.lock.role);
+  lockRoleBtn.disabled = !role;
+  $('#role-cover').classList.toggle('locked', S.lock.role);
+  $('#my-role-card .hint').textContent = S.lock.role ? '已鎖定，㩒下面解鎖' : '㩒住先睇到，放手即刻冚返';
 
   // --- table ---
   $('#game-count').textContent = String(st.players.filter(p => p.isPlayer).length);
@@ -247,8 +320,15 @@ function renderGame() {
       p.isHost && !p.isPlayer ? el('span', { class: 'tag host' }, '主持') : null,
       r ? el('span', { class: 'tag role' }, `${r.emoji} ${r.name}`) : null,
       p.dice ? el('span', { class: 'tag dice' }, '🎲 ' + p.dice.join(' ')) : null,
-      !r && p.isPlayer && p.seenRole ? el('span', { class: 'tag seen' }, '已睇牌') : null,
+      p.diceLocked ? el('span', { class: 'tag' }, '🔒骰') : null,
+      p.roleLocked ? el('span', { class: 'tag' }, '🔒牌') : null,
+      !r && p.isPlayer && p.seenRole && !p.roleLocked ? el('span', { class: 'tag seen' }, '已睇牌') : null,
     ));
+  }
+
+  // --- host controls ---
+  if (S.mode === 'host') {
+    $('#btn-unlock-dice').disabled = !st.players.some(p => p.diceLocked);
   }
 
   // --- log ---
@@ -265,13 +345,22 @@ function render() {
 }
 
 // ------------------------------------------------------------
-// the "冚住" mechanic
+// the "冚住" mechanic — hold to peek, release to cover
 // ------------------------------------------------------------
 const covers = [];
 
 function bindCover(node, what) {
   let open = false;
+
   const set = (v) => {
+    if (v && S.lock[what]) {          // latched shut: refuse, and say why
+      node.classList.remove('denied');
+      void node.offsetWidth;
+      node.classList.add('denied');
+      buzz([25, 40, 25]);
+      toast(what === 'role' ? '角色牌鎖咗，要自己解鎖' : '骰盅鎖咗，要主持解鎖');
+      return;
+    }
     if (open === v) return;
     open = v;
     node.classList.toggle('open', v);
@@ -279,7 +368,6 @@ function bindCover(node, what) {
   };
 
   node.addEventListener('pointerdown', (e) => {
-    if (S.holdMode !== 'hold') return;
     e.preventDefault();
     // Capturing keeps the peek alive if the finger slides off the card.
     // It throws for pointers the browser no longer tracks — never let that
@@ -288,18 +376,25 @@ function bindCover(node, what) {
     set(true);
   });
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
-    node.addEventListener(ev, () => { if (S.holdMode === 'hold') set(false); });
+    node.addEventListener(ev, () => set(false));
   }
-  node.addEventListener('click', () => { if (S.holdMode === 'toggle') set(!open); });
+  // Keyboard: hold the key, same as holding a finger down.
   node.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); set(!open); }
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); set(true); }
   });
+  node.addEventListener('keyup', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); set(false); }
+  });
+  node.addEventListener('blur', () => set(false));
 
-  const api = { close: () => set(false), shake: () => {
-    node.classList.remove('shaking');
-    void node.offsetWidth;            // restart the CSS animation
-    node.classList.add('shaking');
-  } };
+  const api = {
+    close: () => { open = false; node.classList.remove('open'); },
+    shake: () => {
+      node.classList.remove('shaking');
+      void node.offsetWidth;            // restart the CSS animation
+      node.classList.add('shaking');
+    },
+  };
   covers.push(api);
   return api;
 }
@@ -310,6 +405,63 @@ function closeAllCovers() { covers.forEach(c => c.close()); }
 document.addEventListener('visibilitychange', () => { if (document.hidden) closeAllCovers(); });
 window.addEventListener('blur', closeAllCovers);
 window.addEventListener('pagehide', closeAllCovers);
+
+// ------------------------------------------------------------
+// locks
+// ------------------------------------------------------------
+function requestLock(what, on) {
+  S.lock[what] = on;                      // apply now; the host confirms in a moment
+  if (S.mode === 'host') S.game.setLock(S.myId, what, on);
+  else S.net?.send({ t: 'lock', what, on });
+  buzz(on ? [14, 30, 14] : 14);
+  if (on) closeAllCovers();
+  render();
+}
+
+/**
+ * Reconcile local latches with the host.
+ *
+ * A phone that locked while briefly offline must not be silently unlocked
+ * when it reconnects, so a local lock the host does not know about is
+ * re-sent rather than dropped. The one legitimate way a lock clears from
+ * the outside is the host opening every cup, which bumps diceUnlockSeq.
+ */
+function syncLocks(st) {
+  const me = st?.players.find(p => p.id === S.myId);
+  if (!me) return;
+
+  if ((st.diceUnlockSeq ?? 0) > S.seenUnlockSeq) {
+    S.seenUnlockSeq = st.diceUnlockSeq;
+    S.lock.dice = false;
+  } else if (S.mode === 'client' && S.lock.dice && !me.diceLocked) {
+    S.net?.send({ t: 'lock', what: 'dice', on: true });
+  } else {
+    S.lock.dice = me.diceLocked;
+  }
+
+  if (S.mode === 'client' && S.lock.role && !me.roleLocked) S.net?.send({ t: 'lock', what: 'role', on: true });
+  else S.lock.role = me.roleLocked;
+}
+
+// ------------------------------------------------------------
+// QR — pulled in on demand so it never sits on the load path
+// ------------------------------------------------------------
+const QR_CDN = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+let qrLoading = null;
+
+function roomLink() { return location.origin + location.pathname + '?r=' + S.state.code; }
+
+function loadQrLib() {
+  if (window.qrcode) return Promise.resolve(window.qrcode);
+  qrLoading ??= new Promise((resolve, reject) => {
+    const tag = document.createElement('script');
+    tag.src = QR_CDN;
+    tag.onload = () => window.qrcode ? resolve(window.qrcode) : reject(new Error('qrcode global missing'));
+    tag.onerror = () => { qrLoading = null; reject(new Error('QR CDN unreachable')); };
+    document.head.append(tag);
+  });
+  return qrLoading;
+}
 
 // ------------------------------------------------------------
 // host wiring
@@ -323,6 +475,7 @@ function pushState() {
     if (!S.game) return;
     S.state = S.game.publicState();
     S.net?.broadcast({ t: 'state', state: S.state });
+    syncLocks(S.state);
     saveHostSnapshot();
     render();
   });
@@ -345,6 +498,8 @@ function wireGame(g) {
   S.myId = g.hostId;
   S.code = g.code;
   S.mode = 'host';
+  S.seenUnlockSeq = g.diceUnlockSeq;
+  S.lock = { role: false, dice: false };
   setHostBody(true);
   keepAwake(true);
 }
@@ -369,7 +524,13 @@ function onHostMessage(peerId, msg) {
       const p = g.byPeer(peerId);
       if (!p || !p.isPlayer) return;
       if (!g.settings.dice.self) return;
+      if (p.diceLocked) return;
       g.rollOne(p.id);
+      break;
+    }
+    case 'lock': {
+      const p = g.byPeer(peerId);
+      if (p) g.setLock(p.id, msg.what, !!msg.on);
       break;
     }
     case 'seen': {
@@ -408,6 +569,8 @@ function onClientMessage(msg) {
       S.state = msg.state;
       S.secret = msg.secret;
       S.lastRound = msg.state.round;
+      S.seenUnlockSeq = msg.state.diceUnlockSeq ?? 0;
+      syncLocks(msg.state);
       goto(msg.state.phase === 'lobby' ? 'lobby' : 'game');
       render();
       break;
@@ -416,6 +579,7 @@ function onClientMessage(msg) {
       const prev = S.lastRound;
       S.state = msg.state;
       if (msg.state.round !== prev) { S.lastRound = msg.state.round; closeAllCovers(); }
+      syncLocks(msg.state);
       if (msg.state.phase === 'playing' && S.screen === 'lobby') goto('game');
       if (msg.state.phase === 'lobby' && S.screen === 'game') goto('lobby');
       render();
@@ -424,6 +588,9 @@ function onClientMessage(msg) {
 
     case 'secret':
       S.secret = msg.secret;
+      // A fresh card or a fresh roll is a new object to hide, so the old
+      // latch does not carry over — the host cleared its copy too.
+      S.lock = { role: false, dice: false };
       closeAllCovers();
       render();
       break;
@@ -441,26 +608,6 @@ function onClientMessage(msg) {
 function sendSeen(what) {
   if (S.mode === 'host') S.game?.markSeen(S.myId, what);
   else S.net?.send({ t: 'seen', what });
-}
-
-// ------------------------------------------------------------
-// QR — pulled in on demand so it never sits on the load path
-// ------------------------------------------------------------
-const QR_CDN = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
-let qrLoading = null;
-
-function roomLink() { return location.origin + location.pathname + '?r=' + S.state.code; }
-
-function loadQrLib() {
-  if (window.qrcode) return Promise.resolve(window.qrcode);
-  qrLoading ??= new Promise((resolve, reject) => {
-    const tag = document.createElement('script');
-    tag.src = QR_CDN;
-    tag.onload = () => window.qrcode ? resolve(window.qrcode) : reject(new Error('qrcode global missing'));
-    tag.onerror = () => { qrLoading = null; reject(new Error('QR CDN unreachable')); };
-    document.head.append(tag);
-  });
-  return qrLoading;
 }
 
 // ------------------------------------------------------------
@@ -503,13 +650,13 @@ async function doCreate() {
 }
 
 async function doJoin(codeIn, nameIn) {
-  const code = (codeIn ?? $('#join-code').value).trim().toUpperCase();
+  const code = String(codeIn ?? joinCodeString());
   const name = (nameIn ?? $('#join-name').value).trim().slice(0, 12);
-  if (code.length !== 4) { setJoinErr('房間號碼係 4 個字'); return; }
-  if (!name) { setJoinErr('填返個名先'); return; }
+  if (!isRoomCode(code)) { setJoinErr('房間號碼係 4 粒骰（1-6）'); return; }
+  if (!name) { setJoinErr('填返個名先'); $('#join-name').focus(); return; }
   lsSet('ct:name', name);
 
-  $('#join-status').textContent = '連緊…';
+  $('#join-status').textContent = '連緊 ' + code.split('').join('-') + ' …';
   $('#join-status').className = 'status';
   $('#btn-join').disabled = true;
 
@@ -534,10 +681,10 @@ async function doJoin(codeIn, nameIn) {
     keepAwake(true);
   } catch (err) {
     console.error(err);
-    setJoinErr('入唔到房 — 睇下個號碼啱唔啱，房主係咪仲開緊個頁面。');
+    setJoinErr('入唔到房 — 睇下啲骰啱唔啱，房主係咪仲開緊個頁面。');
     S.net?.close(); S.net = null;
   } finally {
-    $('#btn-join').disabled = false;
+    $('#btn-join').disabled = S.joinCode.length !== CODE_LEN;
   }
 }
 
@@ -551,11 +698,17 @@ function leaveRoom() {
   if (S.mode === 'host' && S.game) lsDel('ct:host:' + S.game.code);
   lsDel('ct:resume');
   S.net?.close();
-  Object.assign(S, { mode: null, game: null, net: null, myId: null, code: null, state: null, secret: null, lastRound: -1 });
+  Object.assign(S, {
+    mode: null, game: null, net: null, myId: null, code: null,
+    state: null, secret: null, lastRound: -1, seenUnlockSeq: 0,
+    lock: { role: false, dice: false },
+  });
   keepAwake(false);
   setHostBody(false);
   netbar(null);
+  closeAllCovers();
   goto('home');
+  renderResume();
 }
 
 // ------------------------------------------------------------
@@ -575,7 +728,7 @@ async function resumeHost(code) {
     S.lastRound = S.state.round;
     goto(S.state.phase === 'lobby' ? 'lobby' : 'game');
     render();
-    toast('房間 ' + code + ' 恢復咗，叫朋友 refresh');
+    toast('房間恢復咗，叫朋友 refresh');
   } catch (err) {
     console.error(err);
     toast('恢復唔到：' + (err?.type || err?.message || '未知'), 3200);
@@ -584,19 +737,22 @@ async function resumeHost(code) {
 
 function renderResume() {
   const r = lsGet('ct:resume', null);
-  const old = $('#resume-box');
-  if (old) old.remove();
-  if (!r || Date.now() - (r.savedAt ?? 0) > RESUME_TTL) return;
+  $('#resume-box')?.remove();
+  if (!r || !isRoomCode(r.code) || Date.now() - (r.savedAt ?? 0) > RESUME_TTL) return;
 
   const box = el('div', { class: 'card', id: 'resume-box' },
     el('div', { class: 'setup-line' },
       el('span', {}, r.mode === 'host' ? '你之前開緊房' : '你之前喺房'),
-      el('strong', {}, r.code)),
+      el('strong', {}, r.code.split('').join(' '))),
     el('button', {
       class: 'btn btn-ghost btn-sm', type: 'button',
       onclick: () => {
-        if (r.mode === 'host') resumeHost(r.code);
-        else { $('#join-code').value = r.code; $('#join-name').value = r.name || lsGet('ct:name', ''); goto('join'); doJoin(r.code, r.name || lsGet('ct:name', '')); }
+        if (r.mode === 'host') return resumeHost(r.code);
+        setJoinCode(r.code);
+        const nm = r.name || lsGet('ct:name', '');
+        $('#join-name').value = nm;
+        goto('join');
+        if (nm) doJoin(r.code, nm);
       },
     }, '↩︎ 返去 ' + r.code),
     el('button', {
@@ -611,11 +767,11 @@ function renderResume() {
 // boot
 // ------------------------------------------------------------
 function boot() {
-  // ---- home ----
   const savedName = lsGet('ct:name', '');
   $('#home-name').value = savedName;
   $('#join-name').value = savedName;
 
+  // ---- home ----
   $('#btn-goto-create').onclick = () => {
     if (!$('#home-name').value.trim()) { toast('填返個名先'); $('#home-name').focus(); return; }
     lsSet('ct:name', $('#home-name').value.trim());
@@ -638,7 +794,10 @@ function boot() {
   $('#pc-minus').onclick = () => { S.create.count = Math.max(2, S.create.count - 1); refreshCreate(); };
   $('#pc-plus').onclick  = () => { S.create.count = Math.min(16, S.create.count + 1); refreshCreate(); };
   $('#host-plays').onchange = (e) => { S.create.hostPlays = e.target.checked; refreshCreate(); };
-  $('#btn-add-role').onclick = () => { S.create.roles.splice(S.create.roles.length - 1, 0, makeRole({ name: '新角色', count: 1 })); refreshCreate(); };
+  $('#btn-add-role').onclick = () => {
+    S.create.roles.splice(S.create.roles.length - 1, 0, makeRole({ name: '新角色', count: 1 }));
+    refreshCreate();
+  };
 
   const dc = $('#dice-count');
   for (let i = 1; i <= 5; i++) dc.append(el('option', { value: i }, i + ' 粒'));
@@ -654,8 +813,10 @@ function boot() {
   $('#btn-create').onclick = doCreate;
 
   // ---- join ----
-  $('#join-code').oninput = (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, ''); };
-  $('#join-code').onkeydown = (e) => { if (e.key === 'Enter') doJoin(); };
+  renderDicePad();
+  renderCodeSlots();
+  $('#btn-code-back').onclick = () => { S.joinCode.pop(); buzz(8); renderCodeSlots(); };
+  $('#btn-code-clear').onclick = () => { S.joinCode = []; buzz(8); renderCodeSlots(); };
   $('#join-name').onkeydown = (e) => { if (e.key === 'Enter') doJoin(); };
   $('#btn-join').onclick = () => doJoin();
 
@@ -695,35 +856,32 @@ function boot() {
   bindCover($('#role-cover'), 'role');
   const diceCover = bindCover($('#dice-cover'), 'dice');
 
-  $('#toggle-mode').checked = S.holdMode === 'toggle';
-  $('#toggle-mode').onchange = (e) => {
-    S.holdMode = e.target.checked ? 'toggle' : 'hold';
-    lsSet('ct:holdMode', S.holdMode);
-    closeAllCovers();
-    const t = S.holdMode === 'hold' ? '㩒住先睇到，放手即刻冚返' : '㩒一下開，再㩒一下冚';
-    $('#my-role-card .hint').textContent = t;
-    $('#dice-hint').textContent = S.holdMode === 'hold' ? '㩒住掀起個盅' : '㩒一下掀起個盅';
-  };
-
   $('#btn-roll').onclick = () => {
+    if (S.lock.dice) { toast('骰盅鎖咗，要主持解鎖'); return; }
     diceCover.shake();
     buzz([12, 40, 12]);
     if (S.mode === 'host') S.game.rollOne(S.myId);
     else S.net?.send({ t: 'roll' });
   };
+  $('#btn-lock-role').onclick = () => requestLock('role', !S.lock.role);
+  $('#btn-lock-dice').onclick = () => requestLock('dice', true);
+
   $('#btn-leave-game').onclick = leaveRoom;
   $('#btn-deal').onclick = () => { if (confirm('重新派牌（唔加回合數）？')) S.game.deal({ nextRound: false }); };
   $('#btn-next-round').onclick = () => { S.game.deal(); };
   $('#btn-roll-all').onclick = () => { diceCover.shake(); S.game.rollAll(); };
+  $('#btn-unlock-dice').onclick = () => {
+    if (!S.game.unlockAllDice()) toast('無人鎖住骰盅');
+    else toast('所有骰盅已解鎖');
+  };
   $('#btn-reveal-dice').onclick = () => { if (confirm('公開所有人嘅骰？')) S.game.revealAllDice(); };
   $('#btn-reveal-roles').onclick = () => { if (confirm('開晒所有角色？呢個回合就完喇。')) S.game.revealAllRoles(); };
 
-  // ---- deep link ?r=CODE ----
+  // ---- deep link ?r=1352 ----
   const code = new URLSearchParams(location.search).get('r');
-  if (code && /^[0-9A-Za-z]{4}$/.test(code)) {
-    $('#join-code').value = code.toUpperCase();
+  if (isRoomCode(code)) {
+    setJoinCode(code);
     goto('join');
-    if (savedName) { $('#join-name').value = savedName; }
   } else {
     goto('home');
     renderResume();

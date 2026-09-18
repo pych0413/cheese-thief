@@ -2,8 +2,14 @@
 // util.js — DOM helpers, crypto-grade randomness, local storage
 // ============================================================
 
-/** Ambiguity-free alphabet: no 0/O, no 1/I/L. */
-export const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+/**
+ * Room codes are four dice, so every digit is 1-6 and the join screen
+ * can be a keypad made of dice faces. That is only 6^4 = 1296 rooms —
+ * plenty for concurrent games, and HostNet retries on a taken code.
+ */
+export const CODE_ALPHABET = '123456';
+export const CODE_LEN = 4;
+export const isRoomCode = (s) => typeof s === 'string' && /^[1-6]{4}$/.test(s);
 
 /** Uniform integer in [0, max) using rejection sampling on crypto bytes. */
 export function randInt(max) {
@@ -27,7 +33,7 @@ export function shuffle(arr) {
 
 export function rollDie(sides) { return randInt(sides) + 1; }
 
-export function makeRoomCode(len = 4) {
+export function makeRoomCode(len = CODE_LEN) {
   let s = '';
   for (let i = 0; i < len; i++) s += CODE_ALPHABET[randInt(CODE_ALPHABET.length)];
   return s;

@@ -37,6 +37,7 @@ export class Game {
     this.dice    = new Map();   // pid -> number[] (SECRET until revealed)
     this.revealRoles = false;
     this.revealDice  = false;
+    this.diceUnlockSeq = 0;
     this.log = [];
 
     this.hostId = this.#addPlayer(opts.hostName, { isHost: true, isPlayer: opts.hostPlays });
@@ -52,6 +53,7 @@ export class Game {
     this.players.set(id, {
       id, name, token: uid('t'), isHost, isPlayer,
       connected: isHost, peerId, seenRole: false, seenDice: false,
+      roleLocked: false, diceLocked: false,
     });
     return id;
   }
@@ -144,7 +146,7 @@ export class Game {
     this.revealRoles = false;
     this.phase = 'playing';
     if (nextRound) this.round += 1;
-    for (const p of this.players.values()) p.seenRole = false;
+    for (const p of this.players.values()) { p.seenRole = false; p.roleLocked = false; }
 
     this.note(`派咗牌（第 ${this.round} 回合）`);
     for (const pid of this.players.keys()) this.onSecret(pid);
@@ -158,6 +160,7 @@ export class Game {
     const { count, sides } = this.settings.dice;
     this.dice.set(pid, Array.from({ length: count }, () => rollDie(sides)));
     p.seenDice = false;
+    p.diceLocked = false;
     this.revealDice = false;
     this.onSecret(pid);
   }
@@ -181,6 +184,40 @@ export class Game {
     if (!p) return;
     if (what === 'role' && !p.seenRole) { p.seenRole = true; this.onChange(); }
     if (what === 'dice' && !p.seenDice) { p.seenDice = true; this.onChange(); }
+  }
+
+  // ---------- locks ----------
+  // A locked cover will not lift. Role cards are the owner's to latch and
+  // unlatch — the point is that a friend grabbing your phone and mashing
+  // the card sees nothing. Dice are one-way: once you lock your cup only
+  // the host can open it again, so nobody re-peeks mid-round.
+  setLock(pid, what, on) {
+    const p = this.players.get(pid);
+    if (!p) return;
+    if (what === 'role') {
+      if (p.roleLocked === on) return;
+      p.roleLocked = on;
+      this.note(`${p.name} ${on ? '鎖咗' : '解鎖咗'}角色牌`);
+    } else if (what === 'dice') {
+      if (!on || p.diceLocked) return;   // players cannot self-unlock dice
+      p.diceLocked = true;
+      this.note(`${p.name} 鎖咗骰盅`);
+    }
+    this.onChange();
+  }
+
+  unlockAllDice() {
+    let any = false;
+    for (const p of this.players.values()) {
+      if (p.diceLocked) { p.diceLocked = false; any = true; }
+    }
+    if (!any) return false;
+    // Bumping the sequence is how a phone tells "the host opened my cup"
+    // apart from "the host never heard me lock it" and re-sends the lock.
+    this.diceUnlockSeq += 1;
+    this.note('🔓 主持解鎖咗所有骰盅');
+    this.onChange();
+    return true;
   }
 
   // ---------- reveal ----------
@@ -218,9 +255,11 @@ export class Game {
       },
       revealRoles: this.revealRoles,
       revealDice: this.revealDice,
+      diceUnlockSeq: this.diceUnlockSeq,
       players: this.playerList().map(p => ({
         id: p.id, name: p.name, isHost: p.isHost, isPlayer: p.isPlayer,
         connected: p.connected, seenRole: p.seenRole, seenDice: p.seenDice,
+        roleLocked: p.roleLocked, diceLocked: p.diceLocked,
         hasDice: this.dice.has(p.id),
         roleId: this.revealRoles ? (this.assign.get(p.id) ?? null) : null,
         dice:   this.revealDice  ? (this.dice.get(p.id)   ?? null) : null,
@@ -240,6 +279,7 @@ export class Game {
       assign: [...this.assign.entries()],
       dice: [...this.dice.entries()],
       revealRoles: this.revealRoles, revealDice: this.revealDice,
+      diceUnlockSeq: this.diceUnlockSeq,
       log: this.log,
     };
   }
@@ -251,11 +291,14 @@ export class Game {
     g.round = snap.round;
     g.settings = snap.settings;
     g.hostId = snap.hostId;
-    g.players = new Map(snap.players.map(p => [p.id, { ...p, connected: p.isHost, peerId: null }]));
+    g.players = new Map(snap.players.map(p => [p.id, {
+      roleLocked: false, diceLocked: false, ...p, connected: p.isHost, peerId: null,
+    }]));
     g.assign = new Map(snap.assign);
     g.dice = new Map(snap.dice);
     g.revealRoles = snap.revealRoles;
     g.revealDice = snap.revealDice;
+    g.diceUnlockSeq = snap.diceUnlockSeq ?? 0;
     g.log = snap.log ?? [];
     g.onChange = () => {};
     g.onSecret = () => {};

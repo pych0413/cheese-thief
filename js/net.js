@@ -11,7 +11,7 @@
 import { makeRoomCode, sleep } from './util.js';
 
 const NS = 'cheesethief-v1-';
-export const peerIdFor = (code) => NS + code.toUpperCase();
+export const peerIdFor = (code) => NS + String(code);
 
 // STUN gets us through most NATs; the free TURN relays rescue the
 // carrier-grade NATs that mobile data loves to sit behind.
@@ -57,7 +57,7 @@ export class HostNet extends Emitter {
    * @param {string|null} preferred reuse this code (host refreshed the page); null = pick a fresh one
    */
   async open(preferred = null) {
-    const tries = preferred ? 6 : 8;
+    const tries = preferred ? 6 : 14;   // only 1296 codes exist, so collisions are normal
     let lastErr = null;
 
     for (let i = 0; i < tries; i++) {
@@ -143,7 +143,7 @@ export class ClientNet extends Emitter {
   constructor() { super(); this.peer = null; this.conn = null; this.code = null; this.dead = false; }
 
   async connect(code) {
-    this.code = code.toUpperCase();
+    this.code = String(code);
     this.dead = false;
     this.peer = newPeer(undefined);
     await peerReady(this.peer);
