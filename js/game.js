@@ -187,10 +187,11 @@ export class Game {
   }
 
   // ---------- locks ----------
-  // A locked cover will not lift. Role cards are the owner's to latch and
-  // unlatch — the point is that a friend grabbing your phone and mashing
-  // the card sees nothing. Dice are one-way: once you lock your cup only
-  // the host can open it again, so nobody re-peeks mid-round.
+  // Two different locks. A role card latches shut so a friend grabbing your
+  // phone and mashing the card sees nothing; the owner latches and unlatches
+  // it. A dice lock freezes the roll instead — you keep looking at your own
+  // number, you just cannot roll again until the host unlocks, so nobody
+  // re-rolls for a better one.
   setLock(pid, what, on) {
     const p = this.players.get(pid);
     if (!p) return;
@@ -201,7 +202,7 @@ export class Game {
     } else if (what === 'dice') {
       if (!on || p.diceLocked) return;   // players cannot self-unlock dice
       p.diceLocked = true;
-      this.note(`${p.name} 鎖咗骰盅`);
+      this.note(`${p.name} 鎖定咗點數`);
     }
     this.onChange();
   }
@@ -215,7 +216,7 @@ export class Game {
     // Bumping the sequence is how a phone tells "the host opened my cup"
     // apart from "the host never heard me lock it" and re-sends the lock.
     this.diceUnlockSeq += 1;
-    this.note('🔓 主持解鎖咗所有骰盅');
+    this.note('🔓 主持解鎖咗所有骰盅，可以再搖');
     this.onChange();
     return true;
   }

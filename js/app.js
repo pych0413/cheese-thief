@@ -288,11 +288,12 @@ function renderGame() {
   $('#btn-roll').disabled = S.lock.dice;
 
   const lockDiceBtn = $('#btn-lock-dice');
-  lockDiceBtn.textContent = S.lock.dice ? '🔒 已鎖 — 要主持解鎖' : '🔓 鎖定骰盅';
+  lockDiceBtn.textContent = S.lock.dice ? '🔒 已鎖，主持解鎖' : '🔓 鎖定點數';
   lockDiceBtn.classList.toggle('btn-locked', S.lock.dice);
   lockDiceBtn.disabled = S.lock.dice || !mine?.length;
-  $('#dice-cover').classList.toggle('locked', S.lock.dice);
-  $('#dice-hint').textContent = S.lock.dice ? '已鎖定' : '㩒住掀起個盅';
+  // `pinned` is a corner badge, not a shutter — the cup still opens.
+  $('#dice-cover').classList.toggle('pinned', S.lock.dice);
+  $('#dice-hint').textContent = S.lock.dice ? '㩒住睇得，但搖唔到新骰' : '㩒住掀起個盅';
 
   // --- my role ---
   $('#my-role-card').classList.toggle('hidden', !amPlayer);
@@ -346,19 +347,25 @@ function render() {
 
 // ------------------------------------------------------------
 // the "冚住" mechanic — hold to peek, release to cover
+//
+// The two locks guard different things. A role card is locked so nobody
+// else can open it, so its lock refuses the peek. A dice cup is locked to
+// freeze the roll — it is still your own number, so you can keep looking
+// at it; what you cannot do is roll again.
 // ------------------------------------------------------------
+const LOCK_BLOCKS_PEEK = { role: true, dice: false };
 const covers = [];
 
 function bindCover(node, what) {
   let open = false;
 
   const set = (v) => {
-    if (v && S.lock[what]) {          // latched shut: refuse, and say why
+    if (v && S.lock[what] && LOCK_BLOCKS_PEEK[what]) {   // latched shut: refuse, and say why
       node.classList.remove('denied');
       void node.offsetWidth;
       node.classList.add('denied');
       buzz([25, 40, 25]);
-      toast(what === 'role' ? '角色牌鎖咗，要自己解鎖' : '骰盅鎖咗，要主持解鎖');
+      toast('角色牌鎖咗，要自己解鎖');
       return;
     }
     if (open === v) return;
@@ -414,7 +421,7 @@ function requestLock(what, on) {
   if (S.mode === 'host') S.game.setLock(S.myId, what, on);
   else S.net?.send({ t: 'lock', what, on });
   buzz(on ? [14, 30, 14] : 14);
-  if (on) closeAllCovers();
+  if (on && LOCK_BLOCKS_PEEK[what]) closeAllCovers();
   render();
 }
 
@@ -857,7 +864,7 @@ function boot() {
   const diceCover = bindCover($('#dice-cover'), 'dice');
 
   $('#btn-roll').onclick = () => {
-    if (S.lock.dice) { toast('骰盅鎖咗，要主持解鎖'); return; }
+    if (S.lock.dice) { toast('點數鎖咗，要主持解鎖先搖得'); return; }
     diceCover.shake();
     buzz([12, 40, 12]);
     if (S.mode === 'host') S.game.rollOne(S.myId);
