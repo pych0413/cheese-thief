@@ -375,6 +375,13 @@ input::placeholder { color: #6b6250; }
   text-shadow: 0 .25rem .75rem rgba(0,0,0,.6);
 }
 .cover-card.locked { cursor: default; }
+
+/* pinned: the roll is frozen, but you may still look at your own number */
+.cover-card.pinned::after {
+  content: "🔒"; position: absolute; top: .5rem; right: .625rem; z-index: 5;
+  font-size: 1.25rem; pointer-events: none;
+  filter: drop-shadow(0 .125rem .25rem rgba(0,0,0,.55));
+}
 .cover-card.denied { animation: nope .32s ease-in-out; }
 @keyframes nope {
   0%,100% { transform: translateX(0); }
