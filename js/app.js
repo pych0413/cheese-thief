@@ -174,14 +174,23 @@ function renderDicePad() {
 
 function renderCodeSlots() {
   const wrap = $('#code-slots');
+  const full = S.joinCode.length === CODE_LEN;
   wrap.innerHTML = '';
+
   for (let i = 0; i < CODE_LEN; i++) {
     const v = S.joinCode[i];
-    const slot = el('div', { class: 'code-slot' + (v ? ' filled' : '') });
+    // exactly one slot is "next" — it pulses so the thumb knows where it lands
+    const cls = v ? ' filled' : (i === S.joinCode.length ? ' next' : '');
+    const slot = el('div', { class: 'code-slot' + cls });
     if (v) slot.append(dieEl(v));
     wrap.append(slot);
   }
-  const full = S.joinCode.length === CODE_LEN;
+
+  $('#code-frame').classList.toggle('ready', full);
+  const hint = $('#pad-hint');
+  hint.textContent = full ? '夠數喇，㩒「加入」✓' : '㩒下面啲骰仔 ↓';
+  hint.classList.toggle('done', full);
+
   $('#btn-join').disabled = !full;
   $('#btn-code-back').disabled = S.joinCode.length === 0;
   $('#btn-code-clear').disabled = S.joinCode.length === 0;
