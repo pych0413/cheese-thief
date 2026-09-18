@@ -56,15 +56,19 @@
     </header>
 
     <div class="card">
-      <label class="field">
-        <span class="field-label">房間號碼</span>
-        <input id="join-code" class="code-input" type="text" maxlength="4"
-               inputmode="text" autocapitalize="characters" autocomplete="off"
-               spellcheck="false" placeholder="ABCD" enterkeyhint="go">
-      </label>
+      <span class="field-label">房間號碼 — 㩒骰仔輸入</span>
+      <div class="code-slots" id="code-slots" aria-label="已輸入嘅房間號碼"></div>
+      <div class="dice-pad" id="dice-pad"></div>
+      <div class="pad-actions">
+        <button class="btn btn-ghost btn-sm" id="btn-code-back">⌫ 刪一粒</button>
+        <button class="btn btn-ghost btn-sm" id="btn-code-clear">✕ 清空</button>
+      </div>
+    </div>
+
+    <div class="card">
       <label class="field">
         <span class="field-label">你個名</span>
-        <input id="join-name" type="text" maxlength="12" placeholder="例如：阿聰" autocomplete="nickname">
+        <input id="join-name" type="text" maxlength="12" placeholder="例如：阿聰" autocomplete="nickname" enterkeyhint="go">
       </label>
     </div>
 
@@ -152,7 +156,7 @@
 
     <div class="card code-card">
       <span class="field-label">房間號碼 — 講俾朋友聽</span>
-      <div class="big-code" id="lobby-code">····</div>
+      <div class="big-code" id="lobby-code"></div>
       <div class="code-actions">
         <button class="btn btn-ghost btn-sm" id="btn-copy-link">📋 複製連結</button>
         <button class="btn btn-ghost btn-sm" id="btn-toggle-qr">📱 QR Code</button>
@@ -179,8 +183,43 @@
     <header class="topbar">
       <button class="icon-btn" id="btn-leave-game" aria-label="離開">‹</button>
       <h2>第 <span id="game-round">1</span> 回合</h2>
-      <span class="pill" id="game-code">····</span>
+      <span class="pill" id="game-code"></span>
     </header>
+
+    <!-- dice cup sits above the role card: you shake it far more often -->
+    <div class="card" id="dice-card">
+      <div class="card-head"><h3>骰盅</h3><small class="hint" id="dice-hint">㩒住掀起個盅</small></div>
+      <div class="cover-card dice-cover" id="dice-cover" role="button" tabindex="0" aria-label="㩒住睇骰仔">
+        <div class="cover-face cover-back">
+          <svg class="cup-art" viewBox="0 0 120 108" aria-hidden="true">
+            <defs>
+              <linearGradient id="cupBody" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0"    stop-color="#5c341a"/>
+                <stop offset="0.30" stop-color="#b0702f"/>
+                <stop offset="0.58" stop-color="#8a5223"/>
+                <stop offset="1"    stop-color="#4e2c15"/>
+              </linearGradient>
+            </defs>
+            <ellipse cx="60" cy="97" rx="40" ry="7" fill="rgba(0,0,0,.25)"/>
+            <path d="M42 16 h36 l14 72 h-64 z" fill="url(#cupBody)"/>
+            <ellipse cx="60" cy="16" rx="18" ry="6" fill="#c9853f"/>
+            <ellipse cx="60" cy="16" rx="11" ry="3.4" fill="#7a4720"/>
+            <rect x="33" y="58" width="54" height="7" fill="rgba(0,0,0,.18)"/>
+            <ellipse cx="60" cy="90" rx="32" ry="9" fill="#341d0e"/>
+            <ellipse cx="60" cy="87" rx="32" ry="9" fill="#b0702f"/>
+          </svg>
+          <span>㩒住掀起</span>
+        </div>
+        <div class="cover-face cover-front">
+          <div class="dice-row" id="dice-row"></div>
+          <div class="dice-sum" id="dice-sum"></div>
+        </div>
+      </div>
+      <div class="grid2 tight">
+        <button class="btn btn-ghost" id="btn-roll">🎲 搖我嘅骰</button>
+        <button class="btn btn-ghost" id="btn-lock-dice">🔓 鎖定骰盅</button>
+      </div>
+    </div>
 
     <!-- my role card -->
     <div class="card" id="my-role-card">
@@ -196,27 +235,7 @@
           <div class="role-desc" id="role-desc"></div>
         </div>
       </div>
-      <label class="switch-row compact">
-        <span><strong>改用㩒一下開／㩒一下冚</strong></span>
-        <input type="checkbox" id="toggle-mode">
-        <span class="switch"></span>
-      </label>
-    </div>
-
-    <!-- dice -->
-    <div class="card" id="dice-card">
-      <div class="card-head"><h3>骰盅</h3><small class="hint" id="dice-hint">㩒住掀起個盅</small></div>
-      <div class="cover-card dice-cover" id="dice-cover" role="button" tabindex="0" aria-label="㩒住睇骰仔">
-        <div class="cover-face cover-back">
-          <div class="cover-back-art">🥣</div>
-          <span>㩒住睇骰</span>
-        </div>
-        <div class="cover-face cover-front">
-          <div class="dice-row" id="dice-row"></div>
-          <div class="dice-sum" id="dice-sum"></div>
-        </div>
-      </div>
-      <button class="btn btn-ghost" id="btn-roll">🎲 搖我嘅骰</button>
+      <button class="btn btn-ghost" id="btn-lock-role">🔓 鎖定角色牌</button>
     </div>
 
     <!-- players -->
@@ -231,9 +250,10 @@
       <div class="grid2">
         <button class="btn btn-ghost" id="btn-deal">🃏 重新派牌</button>
         <button class="btn btn-ghost" id="btn-roll-all">🎲 全體搖骰</button>
+        <button class="btn btn-ghost" id="btn-unlock-dice">🔓 解鎖骰盅</button>
         <button class="btn btn-ghost" id="btn-reveal-dice">👁 開晒啲骰</button>
-        <button class="btn btn-danger" id="btn-reveal-roles">🔓 開晒角色</button>
       </div>
+      <button class="btn btn-danger" id="btn-reveal-roles">🔓 開晒角色</button>
       <button class="btn btn-primary" id="btn-next-round">➡️ 下一回合（重新派牌）</button>
     </div>
 
