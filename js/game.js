@@ -6,8 +6,8 @@
 // phone literally never receives another player's card.
 // ============================================================
 
-import { uid, shuffle, rollDie, hhmm } from './util.js?v=202609190337';
-import { buildDeck, validateRoles } from './roles.js?v=202609190337';
+import { uid, shuffle, rollDie, hhmm } from './util.js?v=202609190342';
+import { buildDeck, validateRoles } from './roles.js?v=202609190342';
 
 const MAX_LOG = 60;
 
@@ -53,7 +53,7 @@ export class Game {
     this.players.set(id, {
       id, name, token: uid('t'), isHost, isPlayer,
       connected: isHost, peerId, seenRole: false, seenDice: false,
-      roleLocked: false, diceLocked: false,
+      roleLocked: false, diceLocked: false, diceSeq: 0,
     });
     return id;
   }
@@ -159,6 +159,9 @@ export class Game {
     if (!p) return;
     const { count, sides } = this.settings.dice;
     this.dice.set(pid, Array.from({ length: count }, () => rollDie(sides)));
+    // Counts rolls rather than values, so re-rolling the same number still
+    // reads as a new roll on the other phones.
+    p.diceSeq = (p.diceSeq ?? 0) + 1;
     p.seenDice = false;
     p.diceLocked = false;
     this.revealDice = false;
@@ -293,7 +296,7 @@ export class Game {
     g.settings = snap.settings;
     g.hostId = snap.hostId;
     g.players = new Map(snap.players.map(p => [p.id, {
-      roleLocked: false, diceLocked: false, ...p, connected: p.isHost, peerId: null,
+      roleLocked: false, diceLocked: false, diceSeq: 0, ...p, connected: p.isHost, peerId: null,
     }]));
     g.assign = new Map(snap.assign);
     g.dice = new Map(snap.dice);
@@ -312,6 +315,7 @@ export class Game {
     return {
       roleId: this.assign.get(pid) ?? null,
       dice: this.dice.get(pid) ?? null,
+      diceSeq: this.players.get(pid)?.diceSeq ?? 0,
       round: this.round,
     };
   }
