@@ -350,7 +350,9 @@ input::placeholder { color: #6b6250; }
 }
 .code-actions { display: flex; gap: 10px; justify-content: center; }
 .qr-wrap { margin-top: 16px; display: flex; justify-content: center; }
-.qr-wrap canvas { border-radius: 12px; background: #fff; padding: 10px; }
+.qr-wrap #qr-canvas { border-radius: 12px; background: #fff; padding: 10px; line-height: 0; }
+.qr-wrap #qr-canvas svg { width: 190px; height: 190px; display: block; }
+.qr-wrap .qr-fail { color: var(--text-dim); font-size: 12px; padding: 8px 0; }
 
 .status { text-align: center; font-size: 13px; color: var(--text-dim); min-height: 20px; margin: 4px 0 0; }
 .status.err { color: #ff9b86; }

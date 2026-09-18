@@ -444,6 +444,26 @@ function sendSeen(what) {
 }
 
 // ------------------------------------------------------------
+// QR — pulled in on demand so it never sits on the load path
+// ------------------------------------------------------------
+const QR_CDN = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+let qrLoading = null;
+
+function roomLink() { return location.origin + location.pathname + '?r=' + S.state.code; }
+
+function loadQrLib() {
+  if (window.qrcode) return Promise.resolve(window.qrcode);
+  qrLoading ??= new Promise((resolve, reject) => {
+    const tag = document.createElement('script');
+    tag.src = QR_CDN;
+    tag.onload = () => window.qrcode ? resolve(window.qrcode) : reject(new Error('qrcode global missing'));
+    tag.onerror = () => { qrLoading = null; reject(new Error('QR CDN unreachable')); };
+    document.head.append(tag);
+  });
+  return qrLoading;
+}
+
+// ------------------------------------------------------------
 // actions
 // ------------------------------------------------------------
 async function doCreate() {
@@ -650,16 +670,24 @@ function boot() {
     render();
   };
   $('#btn-copy-link').onclick = async () => {
-    const url = location.origin + location.pathname + '?r=' + S.state.code;
+    const url = roomLink();
     try { await navigator.clipboard.writeText(url); toast('連結已複製'); }
     catch { prompt('複製呢條連結：', url); }
   };
-  $('#btn-toggle-qr').onclick = () => {
+  $('#btn-toggle-qr').onclick = async () => {
     const wrap = $('#qr-wrap');
     wrap.classList.toggle('hidden');
-    if (!wrap.classList.contains('hidden') && window.QRCode) {
-      const url = location.origin + location.pathname + '?r=' + S.state.code;
-      QRCode.toCanvas($('#qr-canvas'), url, { width: 190, margin: 1 }, (e) => e && console.error(e));
+    if (wrap.classList.contains('hidden')) return;
+    const box = $('#qr-canvas');
+    try {
+      const qrcode = await loadQrLib();
+      const qr = qrcode(0, 'M');
+      qr.addData(roomLink());
+      qr.make();
+      box.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 1, scalable: true });
+    } catch {
+      box.innerHTML = '';
+      box.append(el('div', { class: 'qr-fail', text: '載入唔到 QR — 用「複製連結」啦' }));
     }
   };
 
