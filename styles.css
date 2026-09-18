@@ -263,18 +263,61 @@ input::placeholder { color: #6b6250; }
 .role-total.bad { background: rgba(228,87,61,.14); color: #ff9b86; }
 .role-total.good { background: rgba(78,201,122,.12); color: #8fe3ad; }
 
-/* ---------- dice keypad (room codes are four dice) ---------- */
+/* ---------- dice keypad (room codes are four dice) ----------
+   The four slots and the six keys are all dice, so without help they read
+   as one row of ten. The slots get a live neon frame, the next empty one
+   pulses, and a tapped die drops in — so the display announces itself as
+   the display and the keys stay keys. */
+.code-frame {
+  position: relative;
+  padding: .625rem;
+  border-radius: 1.125rem;
+  margin-bottom: .75rem;
+  background: linear-gradient(90deg,
+    #ff5d73, #ffb020, #ffe14d, #4ade80, #38bdf8, #a78bfa, #ff5d73);
+  background-size: 300% 100%;
+  animation: neonRun 7s linear infinite;
+  box-shadow: 0 0 1.5rem rgba(255,225,77,.16);
+}
+.code-frame::before {
+  content: ""; position: absolute; inset: 2px;
+  border-radius: 1rem; background: var(--bg-2);
+}
+.code-frame.ready {
+  animation-duration: 2.2s;
+  box-shadow: 0 0 1.75rem rgba(78,201,122,.35);
+}
+@keyframes neonRun { to { background-position: 300% 0; } }
+
 .code-slots {
-  display: grid; grid-template-columns: repeat(4, 1fr);
-  gap: .625rem; margin-bottom: 1rem;
+  position: relative;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: .5rem;
 }
 .code-slot {
   aspect-ratio: 1; border-radius: .875rem;
   display: grid; place-items: center;
-  background: var(--bg-2); border: 2px dashed var(--line);
+  background: rgba(0,0,0,.25); border: 2px dashed #4a4130;
 }
 .code-slot.filled { border-color: transparent; background: transparent; }
-.code-slot .die { width: 100%; height: 100%; }
+.code-slot .die { width: 100%; height: 100%; animation: dropIn .3s cubic-bezier(.2,.9,.3,1.5); }
+.code-slot.next { border-color: var(--cheese-2); border-style: solid; animation: nextPulse 1.5s ease-in-out infinite; }
+.code-slot.next::after {
+  content: "?"; color: var(--cheese-2); font-size: 1.5rem; font-weight: 800; opacity: .55;
+}
+@keyframes nextPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,220,94,.45); }
+  55%      { box-shadow: 0 0 0 .55rem rgba(255,220,94,0); }
+}
+@keyframes dropIn {
+  from { transform: translateY(-.75rem) scale(.55) rotate(-28deg); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+.pad-hint {
+  text-align: center; font-size: .75rem; color: var(--text-dim);
+  margin: 0 0 .625rem; letter-spacing: .06em;
+}
+.pad-hint.done { color: #8fe3ad; }
 
 .dice-pad { display: grid; grid-template-columns: repeat(6, 1fr); gap: .5rem; }
 .pad-die {
