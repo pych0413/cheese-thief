@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#14110c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="description" content="Cheese Thief — 手機開房、秘密骰仔、私人角色牌">
+<title>🧀 Cheese Thief</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============ HOME ============ -->
+  <section class="screen" data-screen="home">
+    <div class="hero">
+      <div class="hero-cheese">🧀</div>
+      <h1>Cheese Thief</h1>
+      <p class="hero-sub">開個房，幾部手機一齊玩</p>
+    </div>
+
+    <div class="card">
+      <label class="field">
+        <span class="field-label">你個名</span>
+        <input id="home-name" type="text" maxlength="12" placeholder="例如：阿聰" autocomplete="nickname" enterkeyhint="done">
+      </label>
+    </div>
+
+    <div class="stack">
+      <button class="btn btn-primary btn-lg" id="btn-goto-create">
+        <span class="btn-icon">🏠</span> 創建房間
+      </button>
+      <button class="btn btn-ghost btn-lg" id="btn-goto-join">
+        <span class="btn-icon">🚪</span> 加入房間
+      </button>
+    </div>
+
+    <p class="fineprint">
+      唔使註冊、唔使裝 app。房主部手機就係 server —<br>玩緊嗰陣唔好熄屏或者切走個 browser。
+    </p>
+  </section>
+
+  <!-- ============ JOIN ============ -->
+  <section class="screen" data-screen="join">
+    <header class="topbar">
+      <button class="icon-btn" data-back="home" aria-label="返回">‹</button>
+      <h2>加入房間</h2>
+      <span class="spacer"></span>
+    </header>
+
+    <div class="card">
+      <label class="field">
+        <span class="field-label">房間號碼</span>
+        <input id="join-code" class="code-input" type="text" maxlength="4"
+               inputmode="text" autocapitalize="characters" autocomplete="off"
+               spellcheck="false" placeholder="ABCD" enterkeyhint="go">
+      </label>
+      <label class="field">
+        <span class="field-label">你個名</span>
+        <input id="join-name" type="text" maxlength="12" placeholder="例如：阿聰" autocomplete="nickname">
+      </label>
+    </div>
+
+    <button class="btn btn-primary btn-lg" id="btn-join">加入</button>
+    <p class="status" id="join-status"></p>
+  </section>
+
+  <!-- ============ CREATE ============ -->
+  <section class="screen" data-screen="create">
+    <header class="topbar">
+      <button class="icon-btn" data-back="home" aria-label="返回">‹</button>
+      <h2>創建房間</h2>
+      <span class="spacer"></span>
+    </header>
+
+    <div class="card">
+      <div class="field">
+        <span class="field-label">玩家人數</span>
+        <div class="stepper">
+          <button class="step-btn" id="pc-minus" aria-label="減少人數">−</button>
+          <output id="pc-value">5</output>
+          <button class="step-btn" id="pc-plus" aria-label="增加人數">+</button>
+        </div>
+      </div>
+
+      <label class="switch-row">
+        <span>
+          <strong>房主都要玩</strong>
+          <small>關咗嘅話房主做主持（法官），唔會攞角色牌</small>
+        </span>
+        <input type="checkbox" id="host-plays" checked>
+        <span class="switch"></span>
+      </label>
+      <p class="warn" id="hostplay-warn">
+        ⚠️ 房主部手機負責派牌，技術上開 devtools 可以偷睇全場角色。
+        自己friend玩梗係無所謂；要絕對公平就熄咗佢，房主淨係做主持。
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>角色配置</h3>
+        <select id="preset-select" class="mini-select" aria-label="角色範本"></select>
+      </div>
+
+      <div id="role-list" class="role-list"></div>
+
+      <div class="role-total" id="role-total"></div>
+      <button class="btn btn-ghost btn-sm" id="btn-add-role">＋ 加一個角色</button>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>骰仔</h3></div>
+      <div class="field-row">
+        <label class="field flex1">
+          <span class="field-label">粒數</span>
+          <select id="dice-count" class="sel"></select>
+        </label>
+        <label class="field flex1">
+          <span class="field-label">面數</span>
+          <select id="dice-sides" class="sel"></select>
+        </label>
+      </div>
+      <label class="switch-row">
+        <span>
+          <strong>玩家可以自己搖骰</strong>
+          <small>關咗就淨係房主可以叫全體搖骰</small>
+        </span>
+        <input type="checkbox" id="dice-self" checked>
+        <span class="switch"></span>
+      </label>
+    </div>
+
+    <button class="btn btn-primary btn-lg" id="btn-create">開房 🧀</button>
+    <p class="status" id="create-status"></p>
+  </section>
+
+  <!-- ============ LOBBY ============ -->
+  <section class="screen" data-screen="lobby">
+    <header class="topbar">
+      <button class="icon-btn" id="btn-leave-lobby" aria-label="離開">‹</button>
+      <h2>等緊人入房</h2>
+      <span class="spacer"></span>
+    </header>
+
+    <div class="card code-card">
+      <span class="field-label">房間號碼 — 講俾朋友聽</span>
+      <div class="big-code" id="lobby-code">····</div>
+      <div class="code-actions">
+        <button class="btn btn-ghost btn-sm" id="btn-copy-link">📋 複製連結</button>
+        <button class="btn btn-ghost btn-sm" id="btn-toggle-qr">📱 QR Code</button>
+      </div>
+      <div class="qr-wrap hidden" id="qr-wrap"><canvas id="qr-canvas"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>玩家</h3>
+        <span class="pill" id="lobby-count">0 / 0</span>
+      </div>
+      <ul class="player-list" id="lobby-players"></ul>
+    </div>
+
+    <div class="card" id="lobby-setup-summary"></div>
+
+    <button class="btn btn-primary btn-lg host-only" id="btn-start">開始遊戲</button>
+    <p class="status" id="lobby-status"></p>
+  </section>
+
+  <!-- ============ GAME ============ -->
+  <section class="screen" data-screen="game">
+    <header class="topbar">
+      <button class="icon-btn" id="btn-leave-game" aria-label="離開">‹</button>
+      <h2>第 <span id="game-round">1</span> 回合</h2>
+      <span class="pill" id="game-code">····</span>
+    </header>
+
+    <!-- my role card -->
+    <div class="card" id="my-role-card">
+      <div class="card-head"><h3>我嘅角色牌</h3><small class="hint">㩒住先睇到，放手即刻冚返</small></div>
+      <div class="cover-card" id="role-cover" role="button" tabindex="0" aria-label="㩒住睇角色">
+        <div class="cover-face cover-back">
+          <div class="cover-back-art">🧀</div>
+          <span>㩒住睇</span>
+        </div>
+        <div class="cover-face cover-front" id="role-front">
+          <div class="role-emoji" id="role-emoji">?</div>
+          <div class="role-name" id="role-name">未派牌</div>
+          <div class="role-desc" id="role-desc"></div>
+        </div>
+      </div>
+      <label class="switch-row compact">
+        <span><strong>改用㩒一下開／㩒一下冚</strong></span>
+        <input type="checkbox" id="toggle-mode">
+        <span class="switch"></span>
+      </label>
+    </div>
+
+    <!-- dice -->
+    <div class="card" id="dice-card">
+      <div class="card-head"><h3>骰盅</h3><small class="hint" id="dice-hint">㩒住掀起個盅</small></div>
+      <div class="cover-card dice-cover" id="dice-cover" role="button" tabindex="0" aria-label="㩒住睇骰仔">
+        <div class="cover-face cover-back">
+          <div class="cover-back-art">🥣</div>
+          <span>㩒住睇骰</span>
+        </div>
+        <div class="cover-face cover-front">
+          <div class="dice-row" id="dice-row"></div>
+          <div class="dice-sum" id="dice-sum"></div>
+        </div>
+      </div>
+      <button class="btn btn-ghost" id="btn-roll">🎲 搖我嘅骰</button>
+    </div>
+
+    <!-- players -->
+    <div class="card">
+      <div class="card-head"><h3>場上玩家</h3><span class="pill" id="game-count">0</span></div>
+      <ul class="player-list" id="game-players"></ul>
+    </div>
+
+    <!-- host controls -->
+    <div class="card host-only" id="host-panel">
+      <div class="card-head"><h3>主持控制</h3></div>
+      <div class="grid2">
+        <button class="btn btn-ghost" id="btn-deal">🃏 重新派牌</button>
+        <button class="btn btn-ghost" id="btn-roll-all">🎲 全體搖骰</button>
+        <button class="btn btn-ghost" id="btn-reveal-dice">👁 開晒啲骰</button>
+        <button class="btn btn-danger" id="btn-reveal-roles">🔓 開晒角色</button>
+      </div>
+      <button class="btn btn-primary" id="btn-next-round">➡️ 下一回合（重新派牌）</button>
+    </div>
+
+    <!-- log -->
+    <div class="card">
+      <div class="card-head"><h3>記錄</h3></div>
+      <ul class="log" id="game-log"></ul>
+    </div>
+  </section>
+
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="netbar hidden" id="netbar"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

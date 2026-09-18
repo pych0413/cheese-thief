@@ -1,0 +1,14 @@
+{
+  "name": "Cheese Thief",
+  "short_name": "Cheese Thief",
+  "description": "手機開房玩嘅秘密骰仔同角色牌",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#14110c",
+  "theme_color": "#14110c",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
